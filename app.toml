@@ -1,0 +1,4 @@
+name = "Feature Flag Janitor"
+start = "python3 -u app.py"
+health = "/api/health"
+

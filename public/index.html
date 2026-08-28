@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0d1316">
+  <title>Feature Flag Janitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="frame">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">FF</div>
+        <div>
+          <strong>Feature Flag Janitor</strong>
+          <small>发现过期 flag、死分支和实验残留</small>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button class="ghost-btn" id="loadSampleBtn"><span data-icon="spark"></span>载入样例</button>
+        <button class="primary-btn" id="analyzeBtn"><span data-icon="scan"></span>开始扫描</button>
+      </div>
+    </header>
+
+    <div class="workspace-shell">
+      <aside class="sidebar" aria-label="工作区导航">
+        <div class="sidebar-label">WORKSPACE</div>
+        <nav class="side-nav">
+          <button class="side-nav-item" data-target="inputSection"><span class="nav-dot input-dot"></span><span>扫描输入</span><small>配置与代码</small></button>
+          <button class="side-nav-item is-active" data-target="summarySection"><span class="nav-dot result-dot"></span><span>扫描结果</span><small>概览与 flags</small></button>
+          <button class="side-nav-item" data-target="cleanupSection"><span class="nav-dot cleanup-dot"></span><span>清理中心</span><small>分支与任务</small></button>
+          <button class="side-nav-item" data-target="insightSection"><span class="nav-dot insight-dot"></span><span>关系与提醒</span><small>引用图与安全</small></button>
+        </nav>
+        <div class="sidebar-foot"><span class="status-dot"></span>本地扫描模式</div>
+      </aside>
+
+      <main class="layout view-summary">
+      <section class="input-column" id="inputSection">
+        <div class="panel hero">
+          <div class="hero-copy">
+            <span class="eyebrow">OPS / CLEANUP ENGINE</span>
+            <h1>把 flag 债务一次扫干净</h1>
+            <p>支持配置、代码引用、实验日期和发布记录。输出过期项、死分支、清理清单、测试建议和安全提醒。</p>
+          </div>
+          <div class="hero-stats" id="heroStats">
+            <div><strong id="statFlags">0</strong><span>flags</span></div>
+            <div><strong id="statDead">0</strong><span>死分支</span></div>
+            <div><strong id="statRisk">100</strong><span>风险分</span></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <span>FLAG MANIFEST</span>
+              <h2>配置输入</h2>
+            </div>
+            <span class="badge">JSON / TOML / 简单块格式</span>
+          </div>
+          <textarea id="manifestText" spellcheck="false" placeholder='{"flags":[{"key":"checkout_banner","expires_at":"2026-03-01"}]}'></textarea>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <span>EXPERIMENTS</span>
+              <h2>实验日期</h2>
+            </div>
+            <span class="badge">结束时间会参与判定</span>
+          </div>
+          <textarea id="experimentsText" spellcheck="false"></textarea>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <span>RELEASE RECORDS</span>
+              <h2>发布记录</h2>
+            </div>
+            <span class="badge">版本 / 日期 / flags</span>
+          </div>
+          <textarea id="releasesText" spellcheck="false"></textarea>
+        </div>
+
+        <div class="panel file-panel">
+          <div class="panel-head">
+            <div>
+              <span>CODE REFERENCE</span>
+              <h2>代码引用</h2>
+            </div>
+            <span class="badge">拖拽文件或文件夹</span>
+          </div>
+          <label class="dropzone" id="dropzone">
+            <input type="file" id="fileInput" multiple webkitdirectory hidden>
+            <strong>拖进仓库文件</strong>
+            <small>会把文本文件读入扫描，适合本地 repo 和样例目录</small>
+          </label>
+          <div class="file-list" id="fileList"></div>
+        </div>
+      </section>
+
+      <section class="result-column" id="summarySection">
+        <div class="panel summary-panel" id="summaryPanel">
+          <div class="panel-head">
+            <div>
+              <span>SUMMARY</span>
+              <h2>清理概览</h2>
+            </div>
+            <div class="panel-head-actions">
+              <div class="meta" id="generatedAt">等待扫描</div>
+              <button class="ghost-btn compact-btn" id="exportBtn" title="导出扫描报告"><span data-icon="download"></span>导出报告</button>
+            </div>
+          </div>
+          <div class="summary-grid" id="summaryGrid"></div>
+        </div>
+
+        <div class="panel split-panel" id="flagsPanel">
+          <div class="panel-head">
+            <div>
+              <span>EXPIRED FLAGS</span>
+              <h2>过期 flag</h2>
+            </div>
+            <span class="badge" id="flagCount">0</span>
+          </div>
+          <div class="table-wrap"><table id="flagTable"></table></div>
+        </div>
+
+        <div class="panel split-panel" id="branchPanel">
+          <div class="panel-head">
+            <div>
+              <span>DEAD BRANCHES</span>
+              <h2>死分支</h2>
+            </div>
+            <span class="badge" id="branchCount">0</span>
+          </div>
+          <div class="table-wrap"><table id="branchTable"></table></div>
+        </div>
+
+        <div class="panel split-panel" id="cleanupSection">
+          <div class="panel-head">
+            <div>
+              <span>CLEANUP LIST</span>
+              <h2>清理清单</h2>
+            </div>
+            <span class="badge">优先级排序</span>
+          </div>
+          <div id="cleanupList" class="cleanup-list"></div>
+        </div>
+      </section>
+
+      <aside class="right-column" id="insightSection">
+        <div class="panel graph-panel" id="graphPanel">
+          <div class="panel-head">
+            <div>
+              <span>REFERENCE GRAPH</span>
+              <h2>引用图</h2>
+            </div>
+            <span class="badge">flag → file</span>
+          </div>
+          <svg id="graph" viewBox="0 0 1040 760" preserveAspectRatio="none"></svg>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <span>EXPERIMENT RESIDUE</span>
+              <h2>实验代码</h2>
+            </div>
+            <span class="badge" id="residueCount">0</span>
+          </div>
+          <div id="residueList" class="stack-list"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <span>SAFETY REMINDERS</span>
+              <h2>安全提醒</h2>
+            </div>
+          </div>
+          <div id="reminderList" class="stack-list"></div>
+        </div>
+      </aside>
+      </main>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/app.js"></script>
+</body>
+</html>
