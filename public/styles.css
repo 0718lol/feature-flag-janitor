@@ -399,6 +399,7 @@ svg[data-icon] { width: 16px; height: 16px; }
 .detail-section { padding-top: 4px; }
 .detail-section h3 { margin: 0 0 10px; font-size: 14px; }
 .detail-section p { color: var(--muted); }
+.detail-content > .primary-btn { justify-content: center; }
 .evidence-item { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .evidence-item code { grid-column: 1 / -1; overflow-x: auto; padding: 10px; background: #f7fcfe; color: #496779; font: 12px/1.5 "JetBrains Mono", monospace; }
 

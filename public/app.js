@@ -121,14 +121,25 @@ function openFlagDetail(flagKey) {
       <div class="evidence-item"><strong>${escapeHtml(ref.file)}:${ref.line}</strong><span class="tag blue">${escapeHtml(ref.reference_type)}</span><code>${escapeHtml(ref.snippet)}</code></div>
     `).join('') : '<p>代码仓库中未检出引用。删除配置前需要确认外部消费者。</p>'}</section>
     <section class="detail-section"><h3>受影响测试</h3><p>${escapeHtml((row.test_candidates || []).join(', ') || '未找到直接关联测试，建议补充回归测试后再清理。')}</p></section>
+    <button class="primary-btn" id="downloadPatchBtn" data-finding-key="${escapeHtml(row.key)}">下载清理草案</button>
   `;
   $('#detailBackdrop').hidden = false;
   $('#detailDrawer').hidden = false;
+  $('#downloadPatchBtn').addEventListener('click', () => downloadPatch(row.key));
 }
 
 function closeFlagDetail() {
   $('#detailBackdrop').hidden = true;
   $('#detailDrawer').hidden = true;
+}
+
+async function downloadPatch(findingKey) {
+  if (!state.analysis?.scan_id) return toast('当前结果缺少扫描标识');
+  try {
+    const result = await api('/api/patch', { method: 'POST', body: JSON.stringify({ scan_id: state.analysis.scan_id, finding_keys: [findingKey] }) });
+    downloadBlob(result.patch, 'text/plain;charset=utf-8', `cleanup-draft-${findingKey}.patch`);
+    toast('清理草案已下载，请人工审查');
+  } catch (error) { toast(error.message); }
 }
 
 function renderBranchTable(items) {

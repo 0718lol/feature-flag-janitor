@@ -240,6 +240,16 @@ class FeatureFlagJanitorTest(unittest.TestCase):
             result = json.load(response)
         self.assertEqual([item["path"] for item in result["code_files"]], ["src/app.py"])
 
+    def test_patch_endpoint_is_review_only(self):
+        status, sample = self.request_json("/api/sample")
+        status, result = self.request_json("/api/analyze", sample)
+        self.assertEqual(status, 200)
+        status, patch = self.request_json("/api/patch", {"scan_id": result["scan_id"]})
+        self.assertEqual(status, 200)
+        self.assertTrue(patch["review_only"])
+        self.assertIn("No files were changed", patch["patch"])
+        self.assertIn("checkout_banner", patch["patch"])
+
 
 if __name__ == "__main__":
     unittest.main()
