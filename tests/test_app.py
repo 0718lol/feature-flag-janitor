@@ -17,6 +17,9 @@ TEMP_DIR = tempfile.TemporaryDirectory()
 os.environ["PORT"] = "0"
 
 import app
+from janitor.scanner import reference_type, scan_references
+from janitor.rules import dead_branch_state
+from janitor.scoring import infer_risk, priority_for, score_finding
 
 
 class FeatureFlagJanitorTest(unittest.TestCase):
@@ -90,7 +93,139 @@ class FeatureFlagJanitorTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(result["ok"])
 
+    def test_invalid_rollout_returns_actionable_error(self):
+        status, result = self.request_json(
+            "/api/analyze",
+            {"manifest_text": json.dumps({"flags": [{"key": "bad_rollout", "rollout": 120}]})},
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("rollout", result["error"])
+
+    def test_invalid_date_returns_actionable_error(self):
+        status, result = self.request_json(
+            "/api/analyze",
+            {"manifest_text": json.dumps({"flags": [{"key": "bad_date", "expires_at": "tomorrow"}]})},
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("YYYY-MM-DD", result["error"])
+
+    def test_invalid_json_returns_actionable_error(self):
+        req = Request(
+            self.base_url + "/api/analyze",
+            data=b"{not-json}",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            urlopen(req, timeout=3)
+        except HTTPError as error:
+            self.assertEqual(error.code, 400)
+            result = json.load(error)
+            self.assertIn("有效的 JSON", result["error"])
+        else:
+            self.fail("invalid JSON should return HTTP 400")
+
+    def test_comments_are_not_counted_as_code_references(self):
+        payload = {
+            "manifest_text": json.dumps({"flags": [{"key": "comment_only", "rollout": 100}]}),
+            "code_files": [{"path": "src/app.ts", "content": "// comment_only\nconst note = 'comment_only';\n"}],
+            "today": "2026-09-01",
+        }
+        status, result = self.request_json("/api/analyze", payload)
+        self.assertEqual(status, 200)
+        self.assertEqual(result["flags"][0]["reference_count"], 1)
+        self.assertEqual(result["flags"][0]["reference_types"], {"reference": 1})
+
+    def test_reference_evidence_includes_conditional_type(self):
+        payload = {
+            "manifest_text": json.dumps({"flags": [{"key": "checkout_banner", "rollout": 100}]}),
+            "code_files": [{"path": "src/app.ts", "content": "if (flags.checkout_banner) {\n  render();\n}\n"}],
+            "today": "2026-09-01",
+        }
+        status, result = self.request_json("/api/analyze", payload)
+        self.assertEqual(status, 200)
+        self.assertEqual(result["flags"][0]["reference_types"], {"conditional_branch": 1})
+        self.assertEqual(result["dead_branches"][0]["branch"], "else")
+
+    def test_scanner_classifies_tests_and_docs_without_branch_noise(self):
+        flags = [{"key": "checkout_banner"}]
+        files = [
+            {"path": "README.md", "content": "checkout_banner is retired\n"},
+            {"path": "tests/banner.spec.ts", "content": "expect(flags.checkout_banner).toBe(true);\n"},
+        ]
+        hits = scan_references(flags, files)["checkout_banner"]
+        self.assertEqual({hit["reference_type"] for hit in hits}, {"documentation", "test_reference"})
+        self.assertEqual(reference_type("src/app.ts", "flags.checkout_banner", "reference"), "reference")
+
+    def test_rules_do_not_mark_runtime_read_as_dead_branch(self):
+        hits = [{"reference_type": "runtime_read", "polarity": "reference"}]
+        self.assertIsNone(dead_branch_state(hits, 100))
+
+    def test_scoring_prioritizes_expired_sensitive_flag(self):
+        lifecycle = {
+            "expired": True,
+            "archived": False,
+            "completed_experiment": False,
+            "stale_age": 120,
+        }
+        self.assertEqual(score_finding(lifecycle, 2, 100), 70)
+        self.assertEqual(priority_for(lifecycle, 100, "dead-else", 2), "P0")
+        self.assertEqual(infer_risk({"key": "payment_risk_guard"}), "high")
+
+    def test_scan_is_persisted_and_action_can_be_updated(self):
+        status, sample = self.request_json("/api/sample")
+        self.assertEqual(status, 200)
+        status, result = self.request_json("/api/analyze", sample)
+        self.assertEqual(status, 200)
+        self.assertTrue(result["scan_id"].startswith("scan_"))
+        finding_key = result["cleanup_list"][0]["finding_key"]
+        status, action = self.request_json(
+            "/api/actions",
+            {"scan_id": result["scan_id"], "finding_key": finding_key, "action": "ignore"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(action["action"], "ignore")
+        status, loaded = self.request_json(f"/api/scans/{result['scan_id']}")
+        self.assertEqual(status, 200)
+        self.assertEqual(loaded["actions"][finding_key]["action"], "ignore")
+
+    def test_invalid_action_returns_bad_request(self):
+        status, result = self.request_json(
+            "/api/actions",
+            {"scan_id": "missing", "finding_key": "flag", "action": "delete"},
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("action", result["error"])
+
+    def test_action_must_target_existing_finding(self):
+        status, sample = self.request_json("/api/sample")
+        status, result = self.request_json("/api/analyze", sample)
+        self.assertEqual(status, 200)
+        status, response = self.request_json(
+            "/api/actions",
+            {"scan_id": result["scan_id"], "finding_key": "not_a_finding", "action": "ignore"},
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("清理项", response["error"])
+
+    def test_output_contract_contains_input_check_and_consistent_counts(self):
+        status, sample = self.request_json("/api/sample")
+        status, result = self.request_json("/api/analyze", sample)
+        self.assertEqual(status, 200)
+        self.assertTrue(result["input_check"]["valid"])
+        self.assertEqual(result["input_check"]["flags"], result["summary"]["total_flags"])
+        self.assertEqual(result["input_check"]["code_files"], result["summary"]["code_files"])
+        self.assertEqual(result["summary"]["expired_flags"], sum(1 for row in result["flags"] if row["expired"]))
+
+    def test_input_check_warns_when_optional_sources_are_missing(self):
+        status, result = self.request_json(
+            "/api/analyze",
+            {"manifest_text": json.dumps({"flags": [{"key": "simple_flag"}]})},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(result["input_check"]["valid"])
+        self.assertEqual(len(result["input_check"]["warnings"]), 3)
+
 
 if __name__ == "__main__":
     unittest.main()
-

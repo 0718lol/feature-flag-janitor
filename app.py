@@ -4,16 +4,28 @@ import json
 import os
 import re
 import tomllib
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import date, datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from janitor.validation import (
+    MAX_REQUEST_BYTES,
+    InputError,
+    parse_rollout,
+    validate_payload,
+)
+from janitor.scanner import lookup_test_candidates, scan_references
+from janitor.rules import dead_branch_state, flag_lifecycle, group_experiments, reasons_for
+from janitor.scoring import action_for, confidence_for, infer_risk, priority_for, score_finding
+from janitor.storage import Store, StorageError
+
 
 ROOT = Path(__file__).resolve().parent
 PUBLIC = ROOT / "public"
+STORE = Store()
 
 MIME = {
     ".html": "text/html; charset=utf-8",
@@ -228,21 +240,6 @@ def normalize_key(value: Any) -> str:
     return re.sub(r"[^a-z0-9_]+", "_", text.lower()).strip("_")
 
 
-def slug_aliases(flag_key: str) -> list[str]:
-    parts = [part for part in re.split(r"[^A-Za-z0-9]+", flag_key) if part]
-    camel = parts[0] + "".join(part.capitalize() for part in parts[1:]) if parts else flag_key
-    env = re.sub(r"[^A-Za-z0-9]+", "_", flag_key).upper()
-    aliases = {
-        flag_key,
-        normalize_key(flag_key),
-        env,
-        camel,
-        flag_key.replace("_", "-"),
-        flag_key.replace("-", "_"),
-    }
-    return [alias for alias in aliases if alias]
-
-
 def load_text_or_json(value: Any) -> Any:
     if value in (None, ""):
         return None
@@ -271,7 +268,8 @@ def coerce_flag_item(key: Any, value: Any) -> dict[str, Any]:
     item["owner"] = str(item.get("owner") or item.get("team") or "unassigned")
     item["kind"] = str(item.get("kind") or item.get("type") or "release")
     item["status"] = str(item.get("status") or item.get("state") or ("on" if item.get("enabled") else "unknown"))
-    item["rollout"] = int(item.get("rollout") or item.get("percentage") or item.get("percent") or 0)
+    rollout_value = item.get("rollout") or item.get("percentage") or item.get("percent") or 0
+    item["rollout"] = parse_rollout(rollout_value, f"flag {item['key']}.rollout")
     item["expires_at"] = item.get("expires_at") or item.get("expiresAt") or item.get("sunset_at") or item.get("sunsetAt")
     item["created_at"] = item.get("created_at") or item.get("createdAt")
     item["replacement"] = item.get("replacement") or item.get("replacement_flag")
@@ -363,83 +361,9 @@ def parse_code_files(payload: Any) -> list[dict[str, str]]:
     return [{"path": "input.txt", "content": str(payload)}]
 
 
-def line_matches_flag(line: str, flag: str) -> tuple[bool, str]:
-    aliases = slug_aliases(flag)
-    pattern = r"(?<![A-Za-z0-9_])(" + "|".join(re.escape(alias) for alias in sorted(aliases, key=len, reverse=True)) + r")(?![A-Za-z0-9_])"
-    if not re.search(pattern, line):
-        return False, ""
-    lowered = line.lower()
-    alias_hit = any(alias.lower() in lowered for alias in aliases)
-    negative = bool(
-        alias_hit
-        and (
-            "!" in line
-            or "== false" in lowered
-            or "=== false" in lowered
-            or re.search(r"\bnot\b", lowered)
-        )
-    )
-    if negative:
-        return True, "negative"
-    if re.search(r"\belse\b", line):
-        return True, "else"
-    if re.search(r"\bif\b|\bwhen\b|\bcase\b", line):
-        return True, "positive"
-    return True, "reference"
-
-
-def lookup_test_candidates(code_files: list[dict[str, str]], ref_path: str) -> list[str]:
-    ref = Path(ref_path)
-    base = ref.stem
-    candidates: list[str] = []
-    for item in code_files:
-        path = Path(item["path"])
-        name = path.name.lower()
-        if path == ref:
-            continue
-        if path.suffix.lower() not in {".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".java", ".json"}:
-            continue
-        if any(token in name for token in {base.lower(), "test", "spec"}):
-            candidates.append(item["path"])
-    return candidates[:5]
-
-
-def infer_risk(flag: dict[str, Any]) -> str:
-    text = " ".join(str(flag.get(field, "")) for field in ("key", "description", "owner", "kind", "replacement")).lower()
-    if any(word in text for word in ("payment", "billing", "risk", "auth", "permission", "export", "security")):
-        return "high"
-    if flag.get("kind") == "experiment":
-        return "medium"
-    return "low"
-
-
 def build_findings(flags: list[dict[str, Any]], code_files: list[dict[str, str]], experiments: list[dict[str, Any]], releases: list[dict[str, Any]], today: datetime) -> dict[str, Any]:
-    all_hits: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    file_index = {item["path"]: item["content"].splitlines() for item in code_files}
-
-    for flag in flags:
-        aliases = slug_aliases(flag["key"])
-        for path, lines in file_index.items():
-            for line_no, line in enumerate(lines, 1):
-                found, polarity = line_matches_flag(line, flag["key"])
-                if not found:
-                    continue
-                if not any(alias.lower() in line.lower() for alias in aliases):
-                    continue
-                all_hits[flag["key"]].append(
-                    {
-                        "file": path,
-                        "line": line_no,
-                        "snippet": line.strip(),
-                        "polarity": polarity,
-                    }
-                )
-
-    experiment_by_flag = defaultdict(list)
-    for item in experiments:
-        key = normalize_key(item.get("flag") or item.get("name") or item.get("key"))
-        if key:
-            experiment_by_flag[key].append(item)
+    all_hits = scan_references(flags, code_files)
+    experiment_by_flag = group_experiments(experiments, normalize_key)
 
     flag_rows: list[dict[str, Any]] = []
     dead_branches: list[dict[str, Any]] = []
@@ -450,73 +374,32 @@ def build_findings(flags: list[dict[str, Any]], code_files: list[dict[str, str]]
         key = normalize_key(flag["key"])
         hits = all_hits.get(flag["key"], [])
         refs = len(hits)
-        expires_at = parse_date(flag.get("expires_at"))
-        created_at = parse_date(flag.get("created_at"))
-        rollout = int(flag.get("rollout") or 0)
-        status = str(flag.get("status") or "").lower()
-        expired = bool(expires_at and expires_at < today)
-        archived = status in {"archived", "removed", "retired"}
-        completed_experiment = any(
-            parse_date(exp.get("ended_at")) and parse_date(exp.get("ended_at")) < today
-            for exp in experiment_by_flag.get(key, [])
-        )
-        stale_age = None
-        if created_at:
-            stale_age = (today - created_at).days
-        branch_state = None
-        if refs:
-            if rollout >= 100:
-                branch_state = "dead-else" if any(hit["polarity"] == "positive" for hit in hits) else "dead-then"
-            elif rollout <= 0:
-                branch_state = "dead-then" if any(hit["polarity"] == "positive" for hit in hits) else "dead-else"
-        score = 0
-        if expired:
-            score += 40
-        if archived:
-            score += 20
-        if refs and rollout in {0, 100}:
-            score += 20
-        if not refs:
-            score += 15
-        if completed_experiment:
-            score += 10
-        if stale_age and stale_age > 90:
-            score += 10
-        priority = "P0" if expired and rollout == 100 else "P1" if expired or branch_state else "P2" if not refs else "P3"
-        action = "delete-config-and-code" if expired and refs else "remove-config" if not refs else "delete-dead-branch"
-        reason_bits = []
-        if expired:
-            reason_bits.append(f"已过期 {expires_at.date().isoformat() if expires_at else ''}")
-        if archived:
-            reason_bits.append("状态已归档")
-        if rollout >= 100:
-            reason_bits.append("已 100% 发布")
-        if rollout <= 0:
-            reason_bits.append("已完全关闭")
-        if not refs:
-            reason_bits.append("代码中未再检出引用")
-        if completed_experiment:
-            reason_bits.append("实验已结束")
-        if not reason_bits:
-            reason_bits.append("仍处在观察窗口")
+        rollout = parse_rollout(flag.get("rollout"), f"flag {flag['key']}.rollout")
+        lifecycle = flag_lifecycle(flag, experiment_by_flag.get(key, []), today, parse_date)
+        branch_state = dead_branch_state(hits, rollout)
+        score = score_finding(lifecycle, refs, rollout)
+        priority = priority_for(lifecycle, rollout, branch_state, refs)
+        action = action_for(lifecycle, refs)
+        reason_bits = reasons_for(flag, lifecycle, refs)
         risk = infer_risk(flag)
         evidence = "；".join(reason_bits[:2])
-        confidence = "high" if (expired and (rollout in {0, 100} or refs == 0)) or archived else "medium" if expired or branch_state or completed_experiment else "low"
+        confidence = confidence_for(lifecycle, branch_state, rollout, refs)
         row = {
             "key": flag["key"],
             "owner": flag["owner"],
             "kind": flag["kind"],
-            "status": status or "unknown",
+            "status": lifecycle["status"],
             "rollout": rollout,
-            "expires_at": expires_at.date().isoformat() if expires_at else None,
-            "created_at": created_at.date().isoformat() if created_at else None,
+            "expires_at": lifecycle["expires_at"].date().isoformat() if lifecycle["expires_at"] else None,
+            "created_at": lifecycle["created_at"].date().isoformat() if lifecycle["created_at"] else None,
             "risk": risk,
             "references": hits,
             "reference_count": refs,
+            "reference_types": dict(Counter(hit["reference_type"] for hit in hits)),
             "dead_branch": branch_state,
-            "expired": expired,
-            "archived": archived,
-            "completed_experiment": completed_experiment,
+            "expired": lifecycle["expired"],
+            "archived": lifecycle["archived"],
+            "completed_experiment": lifecycle["completed_experiment"],
             "cleanup_priority": priority,
             "cleanup_action": action,
             "reasons": reason_bits,
@@ -543,7 +426,7 @@ def build_findings(flags: list[dict[str, Any]], code_files: list[dict[str, str]]
                     "removal_hint": f"删除 {hits[0]['file']}:{hits[0]['line']} 附近的 {('else' if branch_state == 'dead-else' else 'if')} 分支",
                 }
             )
-        if completed_experiment and hits:
+        if lifecycle["completed_experiment"] and hits:
             experimental_residue.append(
                 {
                     "flag": flag["key"],
@@ -624,6 +507,7 @@ def build_cleanup_list(findings: dict[str, Any]) -> list[dict[str, Any]]:
             items.append(
                 {
                     "priority": row["cleanup_priority"],
+                    "finding_key": row["key"],
                     "task": f"清理 {row['key']}",
                     "detail": ", ".join(row["reasons"]),
                     "files": [hit["file"] for hit in row["references"]] or ["manifest"],
@@ -648,16 +532,45 @@ def build_reminders(findings: dict[str, Any]) -> list[str]:
     return reminders
 
 
+def build_input_check(flags: list[dict[str, Any]], code_files: list[dict[str, str]], experiments: list[dict[str, Any]], releases: list[dict[str, Any]]) -> dict[str, Any]:
+    warnings: list[str] = []
+    if not flags:
+        warnings.append("没有解析到 flag 配置，无法判断过期项。")
+    if not code_files:
+        warnings.append("没有上传代码文件，孤儿 flag 和死分支判断会不完整。")
+    if not experiments:
+        warnings.append("没有实验日期，实验残留判断会不完整。")
+    if not releases:
+        warnings.append("没有发布记录，无法完整验证最后发布和回滚窗口。")
+    return {
+        "valid": not warnings or bool(flags),
+        "flags": len(flags),
+        "code_files": len(code_files),
+        "experiments": len(experiments),
+        "releases": len(releases),
+        "warnings": warnings,
+    }
+
+
 def analyze_payload(payload: dict[str, Any]) -> dict[str, Any]:
     flags = parse_manifest(payload.get("manifest_text") or payload.get("manifest") or payload.get("flags"))
     code_files = parse_code_files(payload.get("code_files") or payload.get("files") or payload.get("code"))
     experiments = parse_records(payload.get("experiments_text") or payload.get("experiments"))
     releases = parse_records(payload.get("releases_text") or payload.get("releases"))
+    validate_payload(
+        payload,
+        parse_manifest=parse_manifest,
+        parse_code_files=parse_code_files,
+        parse_records=parse_records,
+        normalize_key=normalize_key,
+        parse_date=parse_date,
+    )
     today = parse_date(payload.get("today")) or datetime.now(timezone.utc)
     findings = build_findings(flags, code_files, experiments, releases, today)
     graph = build_graph(flags, code_files, findings)
     cleanup_list = build_cleanup_list(findings)
     reminders = build_reminders(findings)
+    input_check = build_input_check(flags, code_files, experiments, releases)
     counts = Counter(
         {
             "total_flags": len(findings["flags"]),
@@ -669,13 +582,14 @@ def analyze_payload(payload: dict[str, Any]) -> dict[str, Any]:
         }
     )
     risk_score = max(0, 100 - counts["expired_flags"] * 18 - counts["dead_branches"] * 10 - counts["experimental_residue"] * 8 - counts["orphan_flags"] * 5)
-    return {
+    result = {
         "generated_at": iso_now(),
         "summary": {
             **counts,
             "risk_score": risk_score,
             "code_files": len(code_files),
         },
+        "input_check": input_check,
         "flags": sorted(findings["flags"], key=lambda row: (row["cleanup_priority"], -row["score"], row["key"])),
         "dead_branches": findings["dead_branches"],
         "experimental_residue": findings["experimental_residue"],
@@ -690,6 +604,9 @@ def analyze_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "code_files": code_files,
         },
     }
+    result["scan_id"] = STORE.save_scan(result)
+    result["actions"] = {}
+    return result
 
 
 def json_response(handler: BaseHTTPRequestHandler, status: int, payload: Any) -> None:
@@ -730,20 +647,36 @@ class Handler(BaseHTTPRequestHandler):
             return json_response(self, 200, {"ok": True, "name": "Feature Flag Janitor", "time": iso_now()})
         if path == "/api/sample":
             return json_response(self, 200, SAMPLE_PAYLOAD)
+        if path == "/api/scans":
+            return json_response(self, 200, {"scans": STORE.list_scans()})
+        if path.startswith("/api/scans/"):
+            scan = STORE.get_scan(path.rsplit("/", 1)[-1])
+            return json_response(self, 200, scan) if scan else json_response(self, 404, {"ok": False, "error": "找不到对应的扫描记录"})
         self.send_error(404)
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        if path != "/api/analyze":
+        if path not in {"/api/analyze", "/api/actions"}:
             self.send_error(404)
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
+            if length > MAX_REQUEST_BYTES:
+                raise InputError("请求体不能超过 8 MB")
             payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            if path == "/api/actions":
+                action = STORE.save_action(str(payload.get("scan_id") or ""), str(payload.get("finding_key") or ""), str(payload.get("action") or ""), str(payload.get("note") or ""))
+                return json_response(self, 200, {"ok": True, **action})
             result = analyze_payload(payload)
             json_response(self, 200, result)
-        except Exception as exc:
+        except json.JSONDecodeError:
+            json_response(self, 400, {"ok": False, "error": "请求内容不是有效的 JSON"})
+        except UnicodeDecodeError:
+            json_response(self, 400, {"ok": False, "error": "请求内容必须使用 UTF-8 编码"})
+        except (InputError, StorageError) as exc:
             json_response(self, 400, {"ok": False, "error": str(exc)})
+        except Exception as exc:
+            json_response(self, 500, {"ok": False, "error": "扫描服务暂时无法处理该请求"})
 
 
 def main() -> None:

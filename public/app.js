@@ -123,17 +123,21 @@ function renderBranchTable(items) {
 
 function renderCleanupList(items) {
   const list = $('#cleanupList');
-  list.innerHTML = items.map((item) => `
-    <div class="cleanup-item" data-task="${escapeHtml(item.task)}">
+  list.innerHTML = items.map((item) => {
+    const savedAction = state.analysis?.actions?.[item.finding_key]?.action;
+    const actionState = savedAction === 'ignore' ? '已忽略' : savedAction === 'defer' ? '已延期' : savedAction === 'resolve' ? '已完成' : '';
+    return `
+    <div class="cleanup-item ${(state.analysis?.actions?.[item.finding_key]?.action || '') === 'resolve' ? 'is-dismissed' : ''}" data-task="${escapeHtml(item.task)}" data-finding-key="${escapeHtml(item.finding_key || '')}">
       <strong>${escapeHtml(item.priority)} · ${escapeHtml(item.task)}</strong>
       <p>${escapeHtml(item.detail)}</p>
       <div class="meta-row">
         ${item.files.map((file) => `<span class="tag blue">${escapeHtml(file)}</span>`).join('')}
         ${(item.tests || []).map((test) => `<span class="tag amber">${escapeHtml(test)}</span>`).join('')}
       </div>
-      <div class="item-actions"><button class="text-btn" data-task-action="defer">稍后处理</button><button class="text-btn" data-task-action="ignore">忽略</button></div>
+      <div class="item-actions">${actionState ? `<span class="task-state">${actionState}</span>` : ''}<button class="text-btn" data-task-action="defer">稍后处理</button><button class="text-btn" data-task-action="ignore">忽略</button><button class="text-btn" data-task-action="resolve">标记完成</button></div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 function renderResidue(items) {
@@ -244,6 +248,30 @@ async function analyze() {
   }
 }
 
+async function saveAction(item, action) {
+  if (!state.analysis?.scan_id || !item.dataset.findingKey) throw new Error('当前结果缺少扫描标识');
+  return api('/api/actions', {
+    method: 'POST',
+    body: JSON.stringify({ scan_id: state.analysis.scan_id, finding_key: item.dataset.findingKey, action }),
+  });
+}
+
+async function loadHistory() {
+  const result = await api('/api/scans');
+  const list = $('#historyList');
+  list.innerHTML = result.scans.length ? result.scans.map((scan) => `
+    <button class="history-item" data-scan-id="${escapeHtml(scan.scan_id)}">
+      <strong>${escapeHtml(scan.scan_id)}</strong>
+      <small>${escapeHtml(new Date(scan.created_at).toLocaleString('zh-CN', { hour12: false }))} · ${scan.summary.clean_candidates} 个高优先级项 · 风险 ${scan.summary.risk_score}</small>
+    </button>
+  `).join('') : '<div class="stack-item"><strong>还没有扫描记录</strong><p>完成一次扫描后会自动保存。</p></div>';
+}
+
+async function openHistory() {
+  $('#historyDrawer').hidden = false;
+  try { await loadHistory(); } catch (error) { toast(error.message); }
+}
+
 function loadPayload(payload) {
   $('#manifestText').value = payload.manifest_text;
   $('#experimentsText').value = payload.experiments_text;
@@ -273,6 +301,8 @@ async function loadSample() {
 $('#analyzeBtn').addEventListener('click', analyze);
 $('#loadSampleBtn').addEventListener('click', loadSample);
 $('#exportBtn').addEventListener('click', exportReport);
+$('#historyBtn').addEventListener('click', openHistory);
+$('#closeHistoryBtn').addEventListener('click', () => { $('#historyDrawer').hidden = true; });
 
 $$('.side-nav-item').forEach((button) => {
   button.addEventListener('click', () => {
@@ -289,9 +319,24 @@ $('#cleanupList').addEventListener('click', (event) => {
   const button = event.target.closest('[data-task-action]');
   if (!button) return;
   const item = button.closest('.cleanup-item');
-  item.classList.add('is-dismissed');
-  button.closest('.item-actions').innerHTML = '<span class="task-state">已记录，扫描结果仍保留</span>';
-  toast(button.dataset.taskAction === 'ignore' ? '已忽略此项' : '已标记稍后处理');
+  const action = button.dataset.taskAction;
+  saveAction(item, action).then(() => {
+    item.classList.toggle('is-dismissed', action === 'resolve' || action === 'ignore');
+    button.closest('.item-actions').innerHTML = '<span class="task-state">已保存，刷新后仍保留</span>';
+    state.analysis.actions = { ...(state.analysis.actions || {}), [item.dataset.findingKey]: { action } };
+    toast(action === 'ignore' ? '已忽略此项' : action === 'resolve' ? '已标记完成' : '已标记稍后处理');
+  }).catch((error) => toast(error.message));
+});
+
+$('#historyList').addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-scan-id]');
+  if (!button) return;
+  try {
+    const result = await api(`/api/scans/${encodeURIComponent(button.dataset.scanId)}`);
+    renderAnalysis(result);
+    $('#historyDrawer').hidden = true;
+    toast('已加载历史扫描');
+  } catch (error) { toast(error.message); }
 });
 
 $('#dropzone').addEventListener('click', () => $('#fileInput').click());

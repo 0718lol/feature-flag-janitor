@@ -21,6 +21,7 @@
         </div>
       </div>
       <div class="topbar-actions">
+        <button class="ghost-btn" id="historyBtn" title="查看历史扫描">扫描历史</button>
         <button class="ghost-btn" id="loadSampleBtn"><span data-icon="spark"></span>载入样例</button>
         <button class="primary-btn" id="analyzeBtn"><span data-icon="scan"></span>开始扫描</button>
       </div>
@@ -190,6 +191,10 @@
   </div>
 
   <div id="toast" class="toast" hidden></div>
+  <div class="history-drawer" id="historyDrawer" hidden>
+    <div class="history-head"><div><span>SCAN HISTORY</span><h2>历史扫描</h2></div><button class="ghost-btn compact-btn" id="closeHistoryBtn">关闭</button></div>
+    <div id="historyList" class="history-list"><div class="stack-item">正在加载历史记录…</div></div>
+  </div>
   <script src="/app.js"></script>
 </body>
 </html>
