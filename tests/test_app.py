@@ -6,6 +6,8 @@ import sys
 import tempfile
 import threading
 import unittest
+import io
+import zipfile
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -225,6 +227,18 @@ class FeatureFlagJanitorTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(result["input_check"]["valid"])
         self.assertEqual(len(result["input_check"]["warnings"]), 3)
+
+    def test_zip_import_reads_text_files_and_skips_unsafe_paths(self):
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zipped:
+            zipped.writestr("src/app.py", "if flags.old_gate:\n    pass\n")
+            zipped.writestr("../escape.py", "old_gate")
+            zipped.writestr("image.bin", "not code")
+        req = Request(self.base_url + "/api/import-zip", data=archive.getvalue(), headers={"Content-Type": "application/zip"}, method="POST")
+        with urlopen(req, timeout=3) as response:
+            self.assertEqual(response.status, 200)
+            result = json.load(response)
+        self.assertEqual([item["path"] for item in result["code_files"]], ["src/app.py"])
 
 
 if __name__ == "__main__":

@@ -31,6 +31,7 @@ Open `http://localhost:8080`.
 - `GET /api/scans/<scan_id>`
 - `POST /api/analyze`
 - `POST /api/actions` with `defer`, `ignore`, or `resolve`
+- `POST /api/import-zip` with an `application/zip` body
 
 Set `JANITOR_DB_PATH` to use a custom SQLite file location. The default is `data/janitor.sqlite3`, which is intentionally ignored by Git.
 

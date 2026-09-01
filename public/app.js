@@ -340,6 +340,16 @@ function readFiles(list) {
   })));
 }
 
+async function importZip(file) {
+  const response = await fetch('/api/import-zip', { method: 'POST', headers: { 'Content-Type': 'application/zip' }, body: file });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'ZIP 导入失败');
+  state.files = data.code_files.map((item) => ({ ...item, lines: item.content.split(/\r?\n/).length, kind: item.path.split('.').pop().toUpperCase() }));
+  renderFiles();
+  toast(`已导入 ${state.files.length} 个文本文件`);
+  await analyze();
+}
+
 async function loadSample() {
   const payload = await api('/api/sample');
   loadPayload(payload);
@@ -401,6 +411,12 @@ $('#historyList').addEventListener('click', async (event) => {
 });
 
 $('#dropzone').addEventListener('click', () => $('#fileInput').click());
+$('#zipBtn').addEventListener('click', () => $('#zipInput').click());
+$('#zipInput').addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  try { await importZip(file); } catch (error) { toast(error.message); }
+});
 $('#fileInput').addEventListener('change', async (event) => {
   const files = await readFiles(event.target.files);
   state.files = files.map((file) => ({

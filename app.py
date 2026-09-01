@@ -21,6 +21,7 @@ from janitor.scanner import lookup_test_candidates, scan_references
 from janitor.rules import dead_branch_state, flag_lifecycle, group_experiments, reasons_for
 from janitor.scoring import action_for, confidence_for, infer_risk, priority_for, score_finding
 from janitor.storage import Store, StorageError
+from janitor.archive import read_zip_files
 
 
 ROOT = Path(__file__).resolve().parent
@@ -656,6 +657,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
+        if path == "/api/import-zip":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if length > MAX_REQUEST_BYTES:
+                    raise InputError("ZIP 请求体不能超过 8 MB")
+                files = read_zip_files(self.rfile.read(length))
+                return json_response(self, 200, {"ok": True, "code_files": files})
+            except InputError as exc:
+                return json_response(self, 400, {"ok": False, "error": str(exc)})
+            except Exception:
+                return json_response(self, 500, {"ok": False, "error": "ZIP 文件暂时无法处理"})
         if path not in {"/api/analyze", "/api/actions"}:
             self.send_error(404)
             return
