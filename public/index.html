@@ -113,9 +113,11 @@
             </div>
             <div class="panel-head-actions">
               <div class="meta" id="generatedAt">等待扫描</div>
-              <button class="ghost-btn compact-btn" id="exportBtn" title="导出扫描报告"><span data-icon="download"></span>导出报告</button>
+              <button class="ghost-btn compact-btn" id="exportBtn" title="导出 Markdown 报告"><span data-icon="download"></span>Markdown</button>
+              <button class="ghost-btn compact-btn" id="exportJsonBtn" title="导出完整 JSON 数据">JSON</button>
             </div>
           </div>
+          <div class="input-check" id="inputCheck"></div>
           <div class="summary-grid" id="summaryGrid"></div>
         </div>
 
@@ -195,6 +197,11 @@
     <div class="history-head"><div><span>SCAN HISTORY</span><h2>历史扫描</h2></div><button class="ghost-btn compact-btn" id="closeHistoryBtn">关闭</button></div>
     <div id="historyList" class="history-list"><div class="stack-item">正在加载历史记录…</div></div>
   </div>
+  <div class="detail-backdrop" id="detailBackdrop" hidden></div>
+  <aside class="detail-drawer" id="detailDrawer" hidden aria-label="Flag 详情">
+    <div class="history-head"><div><span>FINDING DETAIL</span><h2 id="detailTitle">Flag 详情</h2></div><button class="ghost-btn compact-btn" id="closeDetailBtn">关闭</button></div>
+    <div id="detailContent" class="detail-content"></div>
+  </aside>
   <script src="/app.js"></script>
 </body>
 </html>

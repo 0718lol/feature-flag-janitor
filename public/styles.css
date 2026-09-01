@@ -244,6 +244,9 @@ textarea {
 .file-item code { color: var(--teal); font: 12px "JetBrains Mono", monospace; }
 
 .summary-panel { overflow: hidden; }
+.input-check { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 11px 16px; border-bottom: 1px solid var(--line); background: #f7fcfe; color: var(--muted); font-size: 12px; }
+.input-check strong { color: var(--text); }
+.input-check small { flex-basis: 100%; color: var(--amber); padding-left: 15px; }
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -280,6 +283,9 @@ th {
 td { color: #496779; }
 td strong { display: block; color: var(--text); }
 td small { display: block; margin-top: 4px; color: var(--muted); }
+.clickable-row { cursor: pointer; }
+.clickable-row:hover td, .clickable-row:focus td { background: #f1f9fc; }
+.clickable-row:focus { outline: 2px solid #8ccddd; outline-offset: -2px; }
 .tag {
   display: inline-flex;
   align-items: center;
@@ -383,6 +389,16 @@ svg[data-icon] { width: 16px; height: 16px; }
 .history-item { display: grid; gap: 5px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; background: #f8fcfe; text-align: left; }
 .history-item:hover { border-color: #8ccddd; background: #eef9fb; }
 .history-item small { color: var(--muted); }
+.detail-backdrop { position: fixed; inset: 0; z-index: 44; background: rgba(22, 50, 70, .18); }
+.detail-drawer { position: fixed; z-index: 45; top: 0; right: 0; width: min(620px, 100vw); height: 100vh; overflow: auto; padding: 20px; border-left: 1px solid var(--line); background: #fff; box-shadow: -20px 0 60px rgba(53, 115, 140, .18); }
+.detail-content { display: grid; gap: 18px; padding-top: 18px; }
+.detail-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; border: 1px solid var(--line); background: var(--line); }
+.detail-facts .metric { min-height: 100px; }
+.detail-section { padding-top: 4px; }
+.detail-section h3 { margin: 0 0 10px; font-size: 14px; }
+.detail-section p { color: var(--muted); }
+.evidence-item { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.evidence-item code { grid-column: 1 / -1; overflow-x: auto; padding: 10px; background: #f7fcfe; color: #496779; font: 12px/1.5 "JetBrains Mono", monospace; }
 
 @media (max-width: 1280px) {
   .workspace-shell { padding-left: 0; }

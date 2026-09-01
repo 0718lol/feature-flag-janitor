@@ -65,6 +65,12 @@ function renderSummary(data) {
   $('#statDead').textContent = s.dead_branches;
   $('#statRisk').textContent = s.risk_score;
   $('#generatedAt').textContent = `更新于 ${new Date(data.generated_at).toLocaleString('zh-CN', { hour12: false })}`;
+  const check = data.input_check || { warnings: [] };
+  $('#inputCheck').innerHTML = `
+    <span class="status-dot"></span><strong>输入已检验</strong>
+    <span>${check.flags || 0} flags · ${check.code_files || 0} 文件 · ${check.experiments || 0} 实验 · ${check.releases || 0} 发布记录</span>
+    ${(check.warnings || []).map((warning) => `<small>${escapeHtml(warning)}</small>`).join('')}
+  `;
   $('#summaryGrid').innerHTML = [
     metricCard('过期 flag', s.expired_flags, '应尽快处理', s.expired_flags ? 'amber' : ''),
     metricCard('死分支', s.dead_branches, '代码可收尾', s.dead_branches ? 'rose' : ''),
@@ -78,7 +84,7 @@ function renderSummary(data) {
 function renderFlagTable(flags) {
   $('#flagCount').textContent = flags.length;
   const rows = flags.map((row) => `
-    <tr>
+    <tr class="clickable-row" data-flag-key="${escapeHtml(row.key)}" tabindex="0">
       <td>
         <strong>${escapeHtml(row.key)}</strong>
         <small>${escapeHtml(row.description || '无描述')}</small>
@@ -97,6 +103,32 @@ function renderFlagTable(flags) {
     </thead>
     <tbody>${rows || '<tr><td colspan="7">暂无结果</td></tr>'}</tbody>
   `;
+}
+
+function openFlagDetail(flagKey) {
+  const row = state.analysis?.flags.find((flag) => flag.key === flagKey);
+  if (!row) return;
+  $('#detailTitle').textContent = row.key;
+  $('#detailContent').innerHTML = `
+    <div class="detail-facts">
+      ${metricCard('负责人', row.owner, row.kind)}
+      ${metricCard('优先级', row.cleanup_priority, row.cleanup_action, row.cleanup_priority === 'P0' ? 'rose' : 'amber')}
+      ${metricCard('风险', row.risk === 'high' ? '高' : row.risk === 'medium' ? '中' : '低', `置信度 ${row.confidence}`)}
+      ${metricCard('Rollout', `${row.rollout}%`, row.expires_at || '无过期日期')}
+    </div>
+    <section class="detail-section"><h3>判断依据</h3><div class="meta-row">${row.reasons.map((reason) => `<span class="tag amber">${escapeHtml(reason)}</span>`).join('')}</div></section>
+    <section class="detail-section"><h3>代码证据</h3>${row.references.length ? row.references.map((ref) => `
+      <div class="evidence-item"><strong>${escapeHtml(ref.file)}:${ref.line}</strong><span class="tag blue">${escapeHtml(ref.reference_type)}</span><code>${escapeHtml(ref.snippet)}</code></div>
+    `).join('') : '<p>代码仓库中未检出引用。删除配置前需要确认外部消费者。</p>'}</section>
+    <section class="detail-section"><h3>受影响测试</h3><p>${escapeHtml((row.test_candidates || []).join(', ') || '未找到直接关联测试，建议补充回归测试后再清理。')}</p></section>
+  `;
+  $('#detailBackdrop').hidden = false;
+  $('#detailDrawer').hidden = false;
+}
+
+function closeFlagDetail() {
+  $('#detailBackdrop').hidden = true;
+  $('#detailDrawer').hidden = true;
 }
 
 function renderBranchTable(items) {
@@ -226,6 +258,22 @@ function exportReport() {
   toast('报告已导出');
 }
 
+function downloadBlob(content, type, filename) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportJson() {
+  if (!state.analysis) return toast('请先完成一次扫描');
+  downloadBlob(JSON.stringify(state.analysis, null, 2), 'application/json;charset=utf-8', `feature-flag-report-${new Date().toISOString().slice(0, 10)}.json`);
+  toast('JSON 数据已导出');
+}
+
 async function analyze() {
   const payload = {
     manifest_text: $('#manifestText').value,
@@ -301,8 +349,21 @@ async function loadSample() {
 $('#analyzeBtn').addEventListener('click', analyze);
 $('#loadSampleBtn').addEventListener('click', loadSample);
 $('#exportBtn').addEventListener('click', exportReport);
+$('#exportJsonBtn').addEventListener('click', exportJson);
 $('#historyBtn').addEventListener('click', openHistory);
 $('#closeHistoryBtn').addEventListener('click', () => { $('#historyDrawer').hidden = true; });
+$('#closeDetailBtn').addEventListener('click', closeFlagDetail);
+$('#detailBackdrop').addEventListener('click', closeFlagDetail);
+
+$('#flagTable').addEventListener('click', (event) => {
+  const row = event.target.closest('[data-flag-key]');
+  if (row) openFlagDetail(row.dataset.flagKey);
+});
+$('#flagTable').addEventListener('keydown', (event) => {
+  if (!['Enter', ' '].includes(event.key)) return;
+  const row = event.target.closest('[data-flag-key]');
+  if (row) { event.preventDefault(); openFlagDetail(row.dataset.flagKey); }
+});
 
 $$('.side-nav-item').forEach((button) => {
   button.addEventListener('click', () => {
