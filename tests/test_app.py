@@ -8,6 +8,7 @@ import threading
 import unittest
 import io
 import zipfile
+from unittest.mock import patch
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -22,6 +23,7 @@ import app
 from janitor.scanner import reference_type, scan_references
 from janitor.rules import dead_branch_state
 from janitor.scoring import infer_risk, priority_for, score_finding
+from janitor.github import parse_github_url
 
 
 class FeatureFlagJanitorTest(unittest.TestCase):
@@ -239,6 +241,28 @@ class FeatureFlagJanitorTest(unittest.TestCase):
             self.assertEqual(response.status, 200)
             result = json.load(response)
         self.assertEqual([item["path"] for item in result["code_files"]], ["src/app.py"])
+
+    def test_github_import_returns_read_only_source_metadata(self):
+        imported = {
+            "code_files": [{"path": "src/app.py", "content": "if flags.old_gate:\n    pass\n"}],
+            "repo": {"owner": "demo", "name": "repo", "branch": "main", "url": "https://github.com/demo/repo"},
+            "source_meta": {"kind": "github", "repo": "demo/repo", "branch": "main", "tree_entries": 1, "loaded_files": 1, "skipped_files": 0, "warnings": []},
+        }
+        with patch.object(app, "fetch_github_repo", return_value=imported):
+            status, result = self.request_json("/api/import-github", {"repo_url": "https://github.com/demo/repo"})
+        self.assertEqual(status, 200)
+        self.assertEqual(result["source_meta"]["kind"], "github")
+        self.assertEqual(result["repo"]["branch"], "main")
+
+    def test_github_import_rejects_missing_url(self):
+        status, result = self.request_json("/api/import-github", {})
+        self.assertEqual(status, 400)
+        self.assertIn("仓库地址", result["error"])
+
+    def test_github_url_parser_supports_branch_and_rejects_other_hosts(self):
+        self.assertEqual(parse_github_url("https://github.com/acme/flags/tree/release/2026"), ("acme", "flags", "release/2026"))
+        with self.assertRaises(app.InputError):
+            parse_github_url("https://gitlab.com/acme/flags")
 
     def test_patch_endpoint_is_review_only(self):
         status, sample = self.request_json("/api/sample")

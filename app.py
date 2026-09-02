@@ -23,6 +23,7 @@ from janitor.scoring import action_for, confidence_for, infer_risk, priority_for
 from janitor.storage import Store, StorageError
 from janitor.archive import read_zip_files
 from janitor.patches import build_cleanup_patch
+from janitor.github import fetch_github_repo
 
 
 ROOT = Path(__file__).resolve().parent
@@ -534,7 +535,7 @@ def build_reminders(findings: dict[str, Any]) -> list[str]:
     return reminders
 
 
-def build_input_check(flags: list[dict[str, Any]], code_files: list[dict[str, str]], experiments: list[dict[str, Any]], releases: list[dict[str, Any]]) -> dict[str, Any]:
+def build_input_check(flags: list[dict[str, Any]], code_files: list[dict[str, str]], experiments: list[dict[str, Any]], releases: list[dict[str, Any]], source_meta: dict[str, Any] | None = None) -> dict[str, Any]:
     warnings: list[str] = []
     if not flags:
         warnings.append("没有解析到 flag 配置，无法判断过期项。")
@@ -544,6 +545,8 @@ def build_input_check(flags: list[dict[str, Any]], code_files: list[dict[str, st
         warnings.append("没有实验日期，实验残留判断会不完整。")
     if not releases:
         warnings.append("没有发布记录，无法完整验证最后发布和回滚窗口。")
+    if source_meta:
+        warnings.extend(source_meta.get("warnings", []))
     return {
         "valid": not warnings or bool(flags),
         "flags": len(flags),
@@ -551,6 +554,7 @@ def build_input_check(flags: list[dict[str, Any]], code_files: list[dict[str, st
         "experiments": len(experiments),
         "releases": len(releases),
         "warnings": warnings,
+        "source": source_meta or {"kind": "manual"},
     }
 
 
@@ -572,7 +576,7 @@ def analyze_payload(payload: dict[str, Any]) -> dict[str, Any]:
     graph = build_graph(flags, code_files, findings)
     cleanup_list = build_cleanup_list(findings)
     reminders = build_reminders(findings)
-    input_check = build_input_check(flags, code_files, experiments, releases)
+    input_check = build_input_check(flags, code_files, experiments, releases, payload.get("source_meta"))
     counts = Counter(
         {
             "total_flags": len(findings["flags"]),
@@ -604,6 +608,7 @@ def analyze_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "experiments_text": payload.get("experiments_text") or "",
             "releases_text": payload.get("releases_text") or "",
             "code_files": code_files,
+            "source_meta": payload.get("source_meta") or {"kind": "manual"},
         },
     }
     result["scan_id"] = STORE.save_scan(result)
@@ -658,6 +663,23 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
+        if path == "/api/import-github":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if length > MAX_REQUEST_BYTES:
+                    raise InputError("GitHub 请求体不能超过 8 MB")
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                repo_url = str(payload.get("repo_url") or "").strip()
+                if not repo_url:
+                    raise InputError("请先填写 GitHub 仓库地址")
+                imported = fetch_github_repo(repo_url)
+                return json_response(self, 200, {"ok": True, **imported})
+            except json.JSONDecodeError:
+                return json_response(self, 400, {"ok": False, "error": "请求内容不是有效的 JSON"})
+            except InputError as exc:
+                return json_response(self, 400, {"ok": False, "error": str(exc)})
+            except Exception:
+                return json_response(self, 500, {"ok": False, "error": "GitHub 仓库暂时无法读取"})
         if path == "/api/import-zip":
             try:
                 length = int(self.headers.get("Content-Length", "0"))

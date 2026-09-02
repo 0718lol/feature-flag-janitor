@@ -4,6 +4,7 @@ const $$ = (sel) => [...document.querySelectorAll(sel)];
 const state = {
   files: [],
   analysis: null,
+  sourceMeta: { kind: 'manual' },
 };
 
 const icons = {
@@ -292,6 +293,7 @@ async function analyze() {
     releases_text: $('#releasesText').value,
     code_files: state.files,
     today: new Date().toISOString().slice(0, 10),
+    source_meta: state.sourceMeta,
   };
   $('#analyzeBtn').disabled = true;
   $('#analyzeBtn').innerHTML = `${icons.scan}扫描中`;
@@ -341,6 +343,7 @@ function loadPayload(payload) {
     lines: file.content.split(/\r?\n/).length,
     kind: file.path.split('.').pop().toUpperCase(),
   }));
+  state.sourceMeta = payload.source_meta || { kind: 'sample' };
   renderFiles();
 }
 
@@ -356,9 +359,25 @@ async function importZip(file) {
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'ZIP 导入失败');
   state.files = data.code_files.map((item) => ({ ...item, lines: item.content.split(/\r?\n/).length, kind: item.path.split('.').pop().toUpperCase() }));
+  state.sourceMeta = { kind: 'zip', loaded_files: state.files.length };
   renderFiles();
   toast(`已导入 ${state.files.length} 个文本文件`);
   await analyze();
+}
+
+async function importGithub() {
+  const repoUrl = $('#githubUrl').value.trim();
+  if (!repoUrl) return toast('请先填写 GitHub 仓库地址');
+  $('#githubBtn').disabled = true;
+  try {
+    const data = await api('/api/import-github', { method: 'POST', body: JSON.stringify({ repo_url: repoUrl }) });
+    state.files = data.code_files.map((item) => ({ ...item, lines: item.content.split(/\r?\n/).length, kind: item.path.split('.').pop().toUpperCase() }));
+    state.sourceMeta = data.source_meta;
+    renderFiles();
+    toast(`已读取 ${data.repo.owner}/${data.repo.name} · ${data.repo.branch}`);
+    await analyze();
+  } catch (error) { toast(error.message); }
+  finally { $('#githubBtn').disabled = false; }
 }
 
 async function loadSample() {
@@ -428,6 +447,7 @@ $('#zipInput').addEventListener('change', async (event) => {
   if (!file) return;
   try { await importZip(file); } catch (error) { toast(error.message); }
 });
+$('#githubBtn').addEventListener('click', importGithub);
 $('#fileInput').addEventListener('change', async (event) => {
   const files = await readFiles(event.target.files);
   state.files = files.map((file) => ({
@@ -436,6 +456,7 @@ $('#fileInput').addEventListener('change', async (event) => {
     lines: file.content.split(/\r?\n/).length,
     kind: file.path.split('.').pop().toUpperCase(),
   }));
+  state.sourceMeta = { kind: 'manual', loaded_files: state.files.length };
   renderFiles();
   toast(`已载入 ${state.files.length} 个文件`);
   await analyze();
@@ -458,6 +479,7 @@ $('#dropzone').addEventListener('drop', async (event) => {
     lines: file.content.split(/\r?\n/).length,
     kind: file.path.split('.').pop().toUpperCase(),
   }));
+  state.sourceMeta = { kind: 'manual', loaded_files: state.files.length };
   renderFiles();
   toast(`拖入 ${state.files.length} 个文件`);
   await analyze();

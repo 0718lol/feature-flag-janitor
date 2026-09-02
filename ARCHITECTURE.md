@@ -55,10 +55,10 @@ SQLite stores scan metadata, the serialized result, and the latest action per fi
 
 ## Extension order
 
-1. Add JSON report export and a result detail drawer.
-2. Add ZIP upload with the same validation limits.
-3. Generate a downloadable, review-only cleanup patch.
-4. Add GitHub read-only scanning.
+1. JSON report export and a result detail drawer. Done.
+2. ZIP upload with the same validation limits. Done.
+3. A downloadable, review-only cleanup patch. Done.
+4. GitHub read-only scanning for public repositories. Done.
 5. Add CI and pull request drafts after the preceding outputs are trusted.
 
 New functionality should preserve the API contract and add tests before changing persistence or deployment topology.

@@ -32,9 +32,12 @@ Open `http://localhost:8080`.
 - `POST /api/analyze`
 - `POST /api/actions` with `defer`, `ignore`, or `resolve`
 - `POST /api/import-zip` with an `application/zip` body
+- `POST /api/import-github` with a public GitHub repository URL
 - `POST /api/patch` with `scan_id` and optional `finding_keys`; returns a review-only cleanup draft
 
 Patch generation is deliberately review-only. It never writes to uploaded files or commits to GitHub; high-risk findings are labeled for a second review.
+
+GitHub import is read-only and public-repository-only. The service uses the repository default branch unless the URL contains `tree/<branch>`; credentials are not accepted or stored.
 
 Set `JANITOR_DB_PATH` to use a custom SQLite file location. The default is `data/janitor.sqlite3`, which is intentionally ignored by Git.
 

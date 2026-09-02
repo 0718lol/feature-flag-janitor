@@ -231,6 +231,10 @@ textarea {
 }
 .zip-import { display: flex; align-items: center; gap: 10px; padding: 12px 18px 0; }
 .zip-import small { color: var(--muted); }
+.github-import { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 12px 18px 0; }
+.github-import input { min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; outline: none; background: #f8fcfe; }
+.github-import input:focus { border-color: #8ccddd; }
+.github-import small { grid-column: 1 / -1; color: var(--muted); }
 .file-item {
   display: flex;
   justify-content: space-between;
