@@ -24,6 +24,21 @@ from janitor.scanner import reference_type, scan_references
 from janitor.rules import dead_branch_state
 from janitor.scoring import infer_risk, priority_for, score_finding
 from janitor.github import parse_github_url
+from janitor.ai import _safe_payload, summarize_scan
+
+
+class FakeAIResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self):
+        return json.dumps(self.payload).encode("utf-8")
 
 
 class FeatureFlagJanitorTest(unittest.TestCase):
@@ -263,6 +278,40 @@ class FeatureFlagJanitorTest(unittest.TestCase):
         self.assertEqual(parse_github_url("https://github.com/acme/flags/tree/release/2026"), ("acme", "flags", "release/2026"))
         with self.assertRaises(app.InputError):
             parse_github_url("https://gitlab.com/acme/flags")
+
+    def test_ai_payload_excludes_source_code(self):
+        safe = _safe_payload({
+            "scan_id": "scan_test",
+            "source": {"code_files": [{"path": "secret.py", "content": "API_KEY = 'do-not-send'"}]},
+            "flags": [{"key": "demo", "references": [{"snippet": "secret"}]}],
+        })
+        encoded = json.dumps(safe, ensure_ascii=False)
+        self.assertNotIn("do-not-send", encoded)
+        self.assertNotIn("secret.py", encoded)
+
+    def test_ai_request_disables_thinking_and_returns_structured_result(self):
+        response = {"choices": [{"message": {"content": json.dumps({"headline": "需要清理", "summary": "发现一个候选", "priorities": [], "next_steps": [], "caveats": []}, ensure_ascii=False)}}]}
+        requests = []
+
+        def fake_urlopen(request, timeout):
+            requests.append((request, timeout))
+            return FakeAIResponse(response)
+
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-secret", "DEEPSEEK_MODEL": "deepseek-chat"}, clear=False), patch("janitor.ai.urlopen", fake_urlopen):
+            result = summarize_scan({"scan_id": "scan_test", "summary": {}, "flags": [], "cleanup_list": [], "reminders": []})
+        self.assertEqual(result["headline"], "需要清理")
+        body = json.loads(requests[0][0].data)
+        self.assertEqual(body["thinking"], {"type": "disabled"})
+        self.assertNotIn("test-secret", requests[0][0].data.decode("utf-8"))
+
+    def test_ai_endpoint_reports_missing_configuration(self):
+        status, sample = self.request_json("/api/sample")
+        status, result = self.request_json("/api/analyze", sample)
+        self.assertEqual(status, 200)
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}, clear=False):
+            status, response = self.request_json("/api/ai-summary", {"scan_id": result["scan_id"]})
+        self.assertEqual(status, 503)
+        self.assertIn("DEEPSEEK_API_KEY", response["error"])
 
     def test_patch_endpoint_is_review_only(self):
         status, sample = self.request_json("/api/sample")

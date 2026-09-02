@@ -30,6 +30,7 @@ The current product is a single Python process with a browser client. This is in
 | `janitor/rules.py` | normalized records and dates | lifecycle and branch findings | HTTP or persistence |
 | `janitor/scoring.py` | finding signals | risk, score, priority, action, confidence | parsing files |
 | `janitor/storage.py` | scan result and action | scan ID, history, action state | detection logic |
+| `janitor/ai.py` | redacted scan result | optional structured explanation | cleanup decisions or source storage |
 | `public/app.js` | API JSON | views and user actions | source-of-truth state |
 
 ## Input contract
@@ -62,3 +63,7 @@ SQLite stores scan metadata, the serialized result, and the latest action per fi
 5. Add CI and pull request drafts after the preceding outputs are trusted.
 
 New functionality should preserve the API contract and add tests before changing persistence or deployment topology.
+
+## Optional AI boundary
+
+The AI layer is advisory only. It receives a redacted summary and never receives the full `source.code_files`; its result cannot directly change a finding or execute a patch. `DEEPSEEK_API_KEY` is read only from the process environment, and `DEEPSEEK_MODEL` can override the default `deepseek-chat`. Thinking is explicitly disabled in the request.

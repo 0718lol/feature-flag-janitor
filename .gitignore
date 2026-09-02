@@ -10,3 +10,4 @@ build/
 *.log
 .asteam-product.log
 *.sqlite3
+.env

@@ -286,6 +286,28 @@ function exportJson() {
   toast('JSON 数据已导出');
 }
 
+function renderAiSummary(data) {
+  const ai = data.ai || {};
+  $('#aiPanel').hidden = false;
+  $('#aiHeadline').textContent = ai.headline || '扫描解读';
+  $('#aiSummaryText').textContent = ai.summary || '暂无摘要';
+  $('#aiPriorities').innerHTML = (ai.priorities || []).map((item) => `<div class="ai-priority"><strong>${escapeHtml(item.key || '未命名')}</strong><span>${escapeHtml(item.action || '待确认')}</span><small>${escapeHtml(item.reason || '')}</small></div>`).join('') || '<p>没有需要 AI 优先解释的清理项。</p>';
+  $('#aiNextSteps').innerHTML = (ai.next_steps || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('') || '<li>暂无建议</li>';
+  $('#aiCaveats').innerHTML = (ai.caveats || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('') || '<li>请以代码证据和团队审核为准</li>';
+}
+
+async function requestAiSummary() {
+  if (!state.analysis?.scan_id) return toast('请先完成一次扫描');
+  $('#aiSummaryBtn').disabled = true;
+  $('#aiSummaryBtn').textContent = '生成中';
+  try {
+    const data = await api('/api/ai-summary', { method: 'POST', body: JSON.stringify({ scan_id: state.analysis.scan_id }) });
+    renderAiSummary(data);
+    toast('AI 解读已生成');
+  } catch (error) { toast(error.message); }
+  finally { $('#aiSummaryBtn').disabled = false; $('#aiSummaryBtn').textContent = 'AI 解读'; }
+}
+
 async function analyze() {
   const payload = {
     manifest_text: $('#manifestText').value,
@@ -390,6 +412,7 @@ $('#analyzeBtn').addEventListener('click', analyze);
 $('#loadSampleBtn').addEventListener('click', loadSample);
 $('#exportBtn').addEventListener('click', exportReport);
 $('#exportJsonBtn').addEventListener('click', exportJson);
+$('#aiSummaryBtn').addEventListener('click', requestAiSummary);
 $('#historyBtn').addEventListener('click', openHistory);
 $('#closeHistoryBtn').addEventListener('click', () => { $('#historyDrawer').hidden = true; });
 $('#closeDetailBtn').addEventListener('click', closeFlagDetail);

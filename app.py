@@ -24,6 +24,7 @@ from janitor.storage import Store, StorageError
 from janitor.archive import read_zip_files
 from janitor.patches import build_cleanup_patch
 from janitor.github import fetch_github_repo
+from janitor.ai import AIUnavailable, summarize_scan
 
 
 ROOT = Path(__file__).resolve().parent
@@ -708,6 +709,24 @@ class Handler(BaseHTTPRequestHandler):
                 return json_response(self, 400, {"ok": False, "error": str(exc)})
             except Exception:
                 return json_response(self, 500, {"ok": False, "error": "清理草案暂时无法生成"})
+        if path == "/api/ai-summary":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if length > MAX_REQUEST_BYTES:
+                    raise InputError("请求体不能超过 8 MB")
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                scan = STORE.get_scan(str(payload.get("scan_id") or ""))
+                if not scan:
+                    raise InputError("找不到对应的扫描记录")
+                return json_response(self, 200, {"ok": True, "scan_id": scan["scan_id"], "ai": summarize_scan(scan), "thinking": "disabled"})
+            except json.JSONDecodeError:
+                return json_response(self, 400, {"ok": False, "error": "请求内容不是有效的 JSON"})
+            except InputError as exc:
+                return json_response(self, 400, {"ok": False, "error": str(exc)})
+            except AIUnavailable as exc:
+                return json_response(self, 503, {"ok": False, "error": str(exc)})
+            except Exception:
+                return json_response(self, 500, {"ok": False, "error": "AI 解读暂时无法生成"})
         if path not in {"/api/analyze", "/api/actions"}:
             self.send_error(404)
             return

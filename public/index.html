@@ -117,9 +117,16 @@
               <div class="meta" id="generatedAt">等待扫描</div>
               <button class="ghost-btn compact-btn" id="exportBtn" title="导出 Markdown 报告"><span data-icon="download"></span>Markdown</button>
               <button class="ghost-btn compact-btn" id="exportJsonBtn" title="导出完整 JSON 数据">JSON</button>
+              <button class="ghost-btn compact-btn" id="aiSummaryBtn" title="生成 AI 扫描解读">AI 解读</button>
             </div>
           </div>
           <div class="input-check" id="inputCheck"></div>
+          <section class="ai-panel" id="aiPanel" hidden>
+            <div class="ai-panel-head"><div><span>AI REVIEW</span><h3 id="aiHeadline">扫描解读</h3></div><span class="badge">仅供决策参考</span></div>
+            <p id="aiSummaryText"></p>
+            <div id="aiPriorities" class="ai-priorities"></div>
+            <div class="ai-columns"><div><strong>下一步</strong><ul id="aiNextSteps"></ul></div><div><strong>注意事项</strong><ul id="aiCaveats"></ul></div></div>
+          </section>
           <div class="summary-grid" id="summaryGrid"></div>
         </div>
 
