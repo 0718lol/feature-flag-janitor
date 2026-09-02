@@ -4,7 +4,7 @@ import json
 import os
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +27,7 @@ class Store:
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=5)
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
     def _initialize(self) -> None:
@@ -48,16 +49,40 @@ class Store:
                     FOREIGN KEY (scan_id) REFERENCES scans(scan_id) ON DELETE CASCADE
                 );
             """)
+        self.prune_old_scans()
+
+    def prune_old_scans(self) -> int:
+        try:
+            retention_days = max(1, int(os.environ.get("JANITOR_RETENTION_DAYS", "90")))
+        except ValueError:
+            retention_days = 90
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat(timespec="seconds")
+        with self._connect() as connection:
+            cursor = connection.execute("DELETE FROM scans WHERE created_at < ?", (cutoff,))
+        return cursor.rowcount
 
     def save_scan(self, result: dict[str, Any]) -> str:
         scan_id = f"scan_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
         stored = {**result, "scan_id": scan_id}
+        if os.environ.get("JANITOR_STORE_SOURCE", "0").lower() not in {"1", "true", "yes"}:
+            stored["source"] = {
+                "source_meta": result.get("source", {}).get("source_meta", {"kind": "manual"}),
+                "manifest_text": "",
+                "experiments_text": "",
+                "releases_text": "",
+                "code_files": [],
+            }
         with self._connect() as connection:
             connection.execute(
                 "INSERT INTO scans(scan_id, created_at, summary_json, result_json) VALUES (?, ?, ?, ?)",
                 (scan_id, result["generated_at"], json.dumps(result["summary"], ensure_ascii=False), json.dumps(stored, ensure_ascii=False)),
             )
         return scan_id
+
+    def delete_scan(self, scan_id: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute("DELETE FROM scans WHERE scan_id = ?", (scan_id,))
+        return cursor.rowcount > 0
 
     def list_scans(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._connect() as connection:

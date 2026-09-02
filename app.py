@@ -702,7 +702,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not scan:
                     raise InputError("找不到对应的扫描记录")
                 patch = build_cleanup_patch(scan, payload.get("finding_keys"))
-                return json_response(self, 200, {"ok": True, "scan_id": scan["scan_id"], "patch": patch, "review_only": True})
+                return json_response(self, 200, {"ok": True, "scan_id": scan["scan_id"], "patch": patch, "artifact_type": "cleanup_draft_markdown", "applyable": False, "review_only": True})
             except json.JSONDecodeError:
                 return json_response(self, 400, {"ok": False, "error": "请求内容不是有效的 JSON"})
             except InputError as exc:
@@ -748,6 +748,17 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, 400, {"ok": False, "error": str(exc)})
         except Exception as exc:
             json_response(self, 500, {"ok": False, "error": "扫描服务暂时无法处理该请求"})
+
+    def do_DELETE(self) -> None:
+        path = urlparse(self.path).path
+        if not path.startswith("/api/scans/"):
+            self.send_error(404)
+            return
+        scan_id = path.rsplit("/", 1)[-1]
+        if STORE.delete_scan(scan_id):
+            json_response(self, 200, {"ok": True, "scan_id": scan_id})
+        else:
+            json_response(self, 404, {"ok": False, "error": "找不到对应的扫描记录"})
 
 
 def main() -> None:

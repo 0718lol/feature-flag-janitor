@@ -23,7 +23,7 @@ import app
 from janitor.scanner import reference_type, scan_references
 from janitor.rules import dead_branch_state
 from janitor.scoring import infer_risk, priority_for, score_finding
-from janitor.github import parse_github_url
+from janitor.github import fetch_github_repo, parse_github_url
 from janitor.ai import _safe_payload, summarize_scan
 
 
@@ -278,6 +278,21 @@ class FeatureFlagJanitorTest(unittest.TestCase):
         self.assertEqual(parse_github_url("https://github.com/acme/flags/tree/release/2026"), ("acme", "flags", "release/2026"))
         with self.assertRaises(app.InputError):
             parse_github_url("https://gitlab.com/acme/flags")
+        with self.assertRaises(app.InputError):
+            parse_github_url("http://github.com/acme/flags")
+
+    def test_github_fetch_uses_single_archive_download(self):
+        metadata = {"default_branch": "main"}
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zipped:
+            zipped.writestr("demo-main/src/app.py", "if flags.old_gate:\n    pass\n")
+            zipped.writestr("demo-main/image.bin", "binary")
+        with patch("janitor.github._get_json", return_value=metadata) as get_json, patch("janitor.github._get_bytes", return_value=archive.getvalue()) as get_bytes:
+            result = fetch_github_repo("https://github.com/demo/demo")
+        get_json.assert_called_once()
+        get_bytes.assert_called_once()
+        self.assertEqual(result["code_files"][0]["path"], "src/app.py")
+        self.assertEqual(result["source_meta"]["transport"], "codeload_zip")
 
     def test_ai_payload_excludes_source_code(self):
         safe = _safe_payload({
@@ -313,6 +328,19 @@ class FeatureFlagJanitorTest(unittest.TestCase):
         self.assertEqual(status, 503)
         self.assertIn("DEEPSEEK_API_KEY", response["error"])
 
+    def test_scan_source_is_redacted_by_default_and_can_be_deleted(self):
+        status, sample = self.request_json("/api/sample")
+        status, result = self.request_json("/api/analyze", sample)
+        self.assertEqual(status, 200)
+        status, loaded = self.request_json(f"/api/scans/{result['scan_id']}")
+        self.assertEqual(status, 200)
+        self.assertEqual(loaded["source"]["code_files"], [])
+        request = Request(self.base_url + f"/api/scans/{result['scan_id']}", method="DELETE")
+        with urlopen(request, timeout=3) as response:
+            self.assertEqual(response.status, 200)
+        status, missing = self.request_json(f"/api/scans/{result['scan_id']}")
+        self.assertEqual(status, 404)
+
     def test_patch_endpoint_is_review_only(self):
         status, sample = self.request_json("/api/sample")
         status, result = self.request_json("/api/analyze", sample)
@@ -320,7 +348,10 @@ class FeatureFlagJanitorTest(unittest.TestCase):
         status, patch = self.request_json("/api/patch", {"scan_id": result["scan_id"]})
         self.assertEqual(status, 200)
         self.assertTrue(patch["review_only"])
+        self.assertFalse(patch["applyable"])
+        self.assertEqual(patch["artifact_type"], "cleanup_draft_markdown")
         self.assertIn("No files were changed", patch["patch"])
+        self.assertIn("not an applyable Git patch", patch["patch"])
         self.assertIn("checkout_banner", patch["patch"])
 
 

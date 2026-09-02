@@ -66,4 +66,4 @@ New functionality should preserve the API contract and add tests before changing
 
 ## Optional AI boundary
 
-The AI layer is advisory only. It receives a redacted summary and never receives the full `source.code_files`; its result cannot directly change a finding or execute a patch. `DEEPSEEK_API_KEY` is read only from the process environment, and `DEEPSEEK_MODEL` can override the default `deepseek-chat`. Thinking is explicitly disabled in the request.
+The AI layer is advisory only. It receives a redacted summary and never receives the full `source.code_files`; its result cannot directly change a finding or execute a patch. `DEEPSEEK_API_KEY` is read only from the process environment, and `DEEPSEEK_MODEL` can override the default `deepseek-chat`. Thinking is explicitly disabled in the request. Scan history redacts raw source by default and supports explicit deletion.

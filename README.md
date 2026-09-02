@@ -29,18 +29,21 @@ Open `http://localhost:8080`.
 - `GET /api/sample`
 - `GET /api/scans`
 - `GET /api/scans/<scan_id>`
+- `DELETE /api/scans/<scan_id>`
 - `POST /api/analyze`
 - `POST /api/actions` with `defer`, `ignore`, or `resolve`
 - `POST /api/import-zip` with an `application/zip` body
 - `POST /api/import-github` with a public GitHub repository URL
-- `POST /api/patch` with `scan_id` and optional `finding_keys`; returns a review-only cleanup draft
+- `POST /api/patch` with `scan_id` and optional `finding_keys`; returns a review-only cleanup draft document
 - `POST /api/ai-summary` with `scan_id`; returns an optional DeepSeek explanation
 
-Patch generation is deliberately review-only. It never writes to uploaded files or commits to GitHub; high-risk findings are labeled for a second review.
+Cleanup draft generation is deliberately review-only. It returns a Markdown review document, not an applyable patch; it never writes to uploaded files or commits to GitHub. High-risk findings are labeled for a second review.
 
-GitHub import is read-only and public-repository-only. The service uses the repository default branch unless the URL contains `tree/<branch>`; credentials are not accepted or stored.
+GitHub import is read-only and public-repository-only. The service uses the repository default branch unless the URL contains `tree/<branch>`; credentials are not accepted or stored. HTTPS is required.
 
 Optional AI review reads `DEEPSEEK_API_KEY` from the process environment. `DEEPSEEK_MODEL` defaults to `deepseek-chat`, and requests explicitly disable thinking. The key is never returned, persisted, or committed.
+
+Scan history redacts raw source by default. Set `JANITOR_STORE_SOURCE=1` only for controlled debugging; `JANITOR_DB_PATH` selects the SQLite file.
 
 Set `JANITOR_DB_PATH` to use a custom SQLite file location. The default is `data/janitor.sqlite3`, which is intentionally ignored by Git.
 

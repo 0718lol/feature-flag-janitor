@@ -138,7 +138,7 @@ async function downloadPatch(findingKey) {
   if (!state.analysis?.scan_id) return toast('当前结果缺少扫描标识');
   try {
     const result = await api('/api/patch', { method: 'POST', body: JSON.stringify({ scan_id: state.analysis.scan_id, finding_keys: [findingKey] }) });
-    downloadBlob(result.patch, 'text/plain;charset=utf-8', `cleanup-draft-${findingKey}.patch`);
+    downloadBlob(result.patch, 'text/markdown;charset=utf-8', `cleanup-draft-${findingKey}.md`);
     toast('清理草案已下载，请人工审查');
   } catch (error) { toast(error.message); }
 }
