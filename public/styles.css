@@ -253,6 +253,11 @@ textarea {
 .input-check { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 11px 16px; border-bottom: 1px solid var(--line); background: #f7fcfe; color: var(--muted); font-size: 12px; }
 .input-check strong { color: var(--text); }
 .input-check small { flex-basis: 100%; color: var(--amber); padding-left: 15px; }
+.action-summary { display: grid; gap: 4px; padding: 13px 16px; border-bottom: 1px solid var(--line); background: #fffdf7; color: #6f5a31; }
+.action-summary strong { color: var(--text); }
+.action-summary small { color: var(--amber); }
+#aiStatus { color: var(--muted); font-size: 10px; font-weight: 500; }
+.action-summary span { color: #6f5a31; }
 .ai-panel { padding: 16px 18px 18px; border-bottom: 1px solid var(--line); background: #fbfeff; }
 .ai-panel-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
 .ai-panel-head span:first-child { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; }

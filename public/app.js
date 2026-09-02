@@ -5,6 +5,7 @@ const state = {
   files: [],
   analysis: null,
   sourceMeta: { kind: 'manual' },
+  aiConfigured: null,
 };
 
 const icons = {
@@ -15,6 +16,7 @@ const icons = {
 };
 
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+const priorityLabels = { P0: '立即确认', P1: '尽快处理', P2: '建议清理', P3: '暂时观察' };
 
 function toast(message) {
   const el = $('#toast');
@@ -67,18 +69,25 @@ function renderSummary(data) {
   $('#statRisk').textContent = s.risk_score;
   $('#generatedAt').textContent = `更新于 ${new Date(data.generated_at).toLocaleString('zh-CN', { hour12: false })}`;
   const check = data.input_check || { warnings: [] };
+  const source = check.source || {};
+  const sourceLabel = source.kind === 'github' ? `GitHub：${source.repo || '公开仓库'} / ${source.branch || '默认分支'}` : source.kind === 'zip' ? 'ZIP 仓库' : source.kind === 'sample' ? '产品样例' : '手动输入';
   $('#inputCheck').innerHTML = `
     <span class="status-dot"></span><strong>输入已检验</strong>
-    <span>${check.flags || 0} flags · ${check.code_files || 0} 文件 · ${check.experiments || 0} 实验 · ${check.releases || 0} 发布记录</span>
+    <span>${escapeHtml(sourceLabel)} · 已分析 ${check.flags || 0} 个功能开关、${check.code_files || 0} 个代码文件、${check.experiments || 0} 条实验记录、${check.releases || 0} 条发布记录</span>
     ${(check.warnings || []).map((warning) => `<small>${escapeHtml(warning)}</small>`).join('')}
   `;
+  const firstTask = (data.cleanup_list || []).find((item) => item.priority !== 'P3');
+  const highRisk = (data.flags || []).find((item) => item.risk === 'high' && item.cleanup_priority !== 'P3');
+  $('#actionSummary').innerHTML = firstTask
+    ? `<strong>当前建议</strong><span>先${priorityLabels[firstTask.priority] || '处理'} ${escapeHtml(firstTask.finding_key || firstTask.task.replace(/^清理 /, ''))}。</span>${highRisk ? `<small>${escapeHtml(highRisk.key)} 涉及高风险业务，建议由 ${escapeHtml(highRisk.owner)} 负责人二次确认。</small>` : ''}`
+    : '<strong>当前建议</strong><span>暂无需要立即处理的清理项，继续观察即可。</span>';
   $('#summaryGrid').innerHTML = [
-    metricCard('过期 flag', s.expired_flags, '应尽快处理', s.expired_flags ? 'amber' : ''),
-    metricCard('死分支', s.dead_branches, '代码可收尾', s.dead_branches ? 'rose' : ''),
-    metricCard('实验残留', s.experimental_residue, '实验代码仍在', s.experimental_residue ? 'blue' : ''),
-    metricCard('孤儿 flag', s.orphan_flags, '仓库未再引用', s.orphan_flags ? 'amber' : ''),
-    metricCard('高优先级项', s.clean_candidates, 'P0 / P1 候选', s.clean_candidates ? 'rose' : ''),
-    metricCard('风险分', s.risk_score, '越低越安全', s.risk_score < 70 ? 'rose' : 'green'),
+    metricCard('过期开关', s.expired_flags, '需要尽快确认', s.expired_flags ? 'amber' : ''),
+    metricCard('疑似固定分支', s.dead_branches, '可能可以收尾', s.dead_branches ? 'rose' : ''),
+    metricCard('实验残留代码', s.experimental_residue, '实验结束后仍在', s.experimental_residue ? 'blue' : ''),
+    metricCard('未被代码引用', s.orphan_flags, '先确认外部使用者', s.orphan_flags ? 'amber' : ''),
+    metricCard('需要优先确认', s.clean_candidates, '立即确认 / 尽快处理', s.clean_candidates ? 'rose' : ''),
+    metricCard('安全度', s.risk_score, '分数越高越安全', s.risk_score < 70 ? 'rose' : 'green'),
   ].join('');
 }
 
@@ -100,7 +109,7 @@ function renderFlagTable(flags) {
   `).join('');
   $('#flagTable').innerHTML = `
     <thead>
-      <tr><th>Flag</th><th>Owner</th><th>Status</th><th>Rollout</th><th>Expires</th><th>Refs</th><th>Confidence</th></tr>
+      <tr><th>功能开关</th><th>负责人</th><th>状态</th><th>发布比例</th><th>到期时间</th><th>代码引用</th><th>判断可信度</th></tr>
     </thead>
     <tbody>${rows || '<tr><td colspan="7">暂无结果</td></tr>'}</tbody>
   `;
@@ -113,7 +122,7 @@ function openFlagDetail(flagKey) {
   $('#detailContent').innerHTML = `
     <div class="detail-facts">
       ${metricCard('负责人', row.owner, row.kind)}
-      ${metricCard('优先级', row.cleanup_priority, row.cleanup_action, row.cleanup_priority === 'P0' ? 'rose' : 'amber')}
+      ${metricCard('处理优先级', priorityLabels[row.cleanup_priority] || row.cleanup_priority, row.cleanup_action === 'remove-config' ? '移除配置' : row.cleanup_action === 'delete-dead-branch' ? '收尾固定分支' : '配置与代码一起确认', row.cleanup_priority === 'P0' ? 'rose' : 'amber')}
       ${metricCard('风险', row.risk === 'high' ? '高' : row.risk === 'medium' ? '中' : '低', `置信度 ${row.confidence}`)}
       ${metricCard('Rollout', `${row.rollout}%`, row.expires_at || '无过期日期')}
     </div>
@@ -152,16 +161,16 @@ function renderBranchTable(items) {
         <small>${escapeHtml(row.reason)}</small>
       </td>
       <td>${escapeHtml(row.file)}:${row.line}</td>
-      <td><span class="tag ${row.branch === 'else' ? 'amber' : 'rose'}">${row.branch} 分支</span></td>
+      <td><span class="tag ${row.branch === 'else' ? 'amber' : 'rose'}">${row.branch === 'else' ? '另一侧' : '当前侧'}分支</span></td>
       <td>${escapeHtml(row.removal_hint)}</td>
       <td>${escapeHtml((row.tests || []).join(', ') || '建议补充回归测试')}</td>
     </tr>
   `).join('');
   $('#branchTable').innerHTML = `
     <thead>
-      <tr><th>Flag</th><th>Location</th><th>Branch</th><th>Hint</th><th>Tests</th></tr>
+      <tr><th>功能开关</th><th>代码位置</th><th>固定分支</th><th>处理建议</th><th>相关测试</th></tr>
     </thead>
-    <tbody>${rows || '<tr><td colspan="5">暂无死分支</td></tr>'}</tbody>
+    <tbody>${rows || '<tr><td colspan="5">暂无疑似固定分支</td></tr>'}</tbody>
   `;
 }
 
@@ -172,7 +181,7 @@ function renderCleanupList(items) {
     const actionState = savedAction === 'ignore' ? '已忽略' : savedAction === 'defer' ? '已延期' : savedAction === 'resolve' ? '已完成' : '';
     return `
     <div class="cleanup-item ${(state.analysis?.actions?.[item.finding_key]?.action || '') === 'resolve' ? 'is-dismissed' : ''}" data-task="${escapeHtml(item.task)}" data-finding-key="${escapeHtml(item.finding_key || '')}">
-      <strong>${escapeHtml(item.priority)} · ${escapeHtml(item.task)}</strong>
+      <strong>${escapeHtml(priorityLabels[item.priority] || item.priority)} · ${escapeHtml(item.task)}</strong>
       <p>${escapeHtml(item.detail)}</p>
       <div class="meta-row">
         ${item.files.map((file) => `<span class="tag blue">${escapeHtml(file)}</span>`).join('')}
@@ -305,7 +314,13 @@ async function requestAiSummary() {
     renderAiSummary(data);
     toast('AI 解读已生成');
   } catch (error) { toast(error.message); }
-  finally { $('#aiSummaryBtn').disabled = false; $('#aiSummaryBtn').textContent = 'AI 解读'; }
+  finally { $('#aiSummaryBtn').disabled = false; setAiStatus(state.aiConfigured); }
+}
+
+function setAiStatus(configured) {
+  state.aiConfigured = configured;
+  $('#aiStatus').textContent = configured === true ? '可用' : configured === false ? '未配置' : '不可用';
+  $('#aiSummaryBtn').title = configured === true ? '生成 AI 扫描解读' : '未配置 DeepSeek API 密钥';
 }
 
 async function analyze() {
@@ -413,6 +428,9 @@ $('#loadSampleBtn').addEventListener('click', loadSample);
 $('#exportBtn').addEventListener('click', exportReport);
 $('#exportJsonBtn').addEventListener('click', exportJson);
 $('#aiSummaryBtn').addEventListener('click', requestAiSummary);
+api('/api/health').then((health) => {
+  setAiStatus(health.ai_configured);
+}).catch(() => { setAiStatus(null); });
 $('#historyBtn').addEventListener('click', openHistory);
 $('#closeHistoryBtn').addEventListener('click', () => { $('#historyDrawer').hidden = true; });
 $('#closeDetailBtn').addEventListener('click', closeFlagDetail);

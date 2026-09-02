@@ -652,7 +652,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/app.js":
             return self.send_file(PUBLIC / "app.js")
         if path == "/api/health":
-            return json_response(self, 200, {"ok": True, "name": "Feature Flag Janitor", "time": iso_now()})
+            return json_response(self, 200, {"ok": True, "name": "Feature Flag Janitor", "time": iso_now(), "ai_configured": bool(os.environ.get("DEEPSEEK_API_KEY", "").strip())})
         if path == "/api/sample":
             return json_response(self, 200, SAMPLE_PAYLOAD)
         if path == "/api/scans":

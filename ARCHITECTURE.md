@@ -64,6 +64,10 @@ SQLite stores scan metadata, the serialized result, and the latest action per fi
 
 New functionality should preserve the API contract and add tests before changing persistence or deployment topology.
 
+## User-facing language
+
+The interface uses business-readable labels for decisions: `立即确认`, `尽快处理`, `建议清理`, and `暂时观察`. Technical fields remain available in the detail drawer, while the summary explains the source coverage, the current recommendation, the responsible owner, and the evidence behind it.
+
 ## Optional AI boundary
 
 The AI layer is advisory only. It receives a redacted summary and never receives the full `source.code_files`; its result cannot directly change a finding or execute a patch. `DEEPSEEK_API_KEY` is read only from the process environment, and `DEEPSEEK_MODEL` can override the default `deepseek-chat`. Thinking is explicitly disabled in the request. Scan history redacts raw source by default and supports explicit deletion.

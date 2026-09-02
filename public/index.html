@@ -14,7 +14,7 @@
         <div class="brand-mark">FF</div>
         <div>
           <strong>Feature Flag Janitor</strong>
-          <small>发现过期 flag、死分支和实验残留</small>
+          <small>发现过期开关、疑似固定分支和实验残留</small>
         </div>
       </div>
       <div class="topbar-actions">
@@ -30,8 +30,8 @@
         <nav class="side-nav">
           <button class="side-nav-item" data-target="inputSection"><span class="nav-dot input-dot"></span><span>扫描输入</span><small>配置与代码</small></button>
           <button class="side-nav-item is-active" data-target="summarySection"><span class="nav-dot result-dot"></span><span>扫描结果</span><small>概览与 flags</small></button>
-          <button class="side-nav-item" data-target="cleanupSection"><span class="nav-dot cleanup-dot"></span><span>清理中心</span><small>分支与任务</small></button>
-          <button class="side-nav-item" data-target="insightSection"><span class="nav-dot insight-dot"></span><span>关系与提醒</span><small>引用图与安全</small></button>
+          <button class="side-nav-item" data-target="cleanupSection"><span class="nav-dot cleanup-dot"></span><span>清理中心</span><small>处理建议与任务</small></button>
+          <button class="side-nav-item" data-target="insightSection"><span class="nav-dot insight-dot"></span><span>关系与提醒</span><small>文件关系与安全</small></button>
         </nav>
         <div class="sidebar-foot"><span class="status-dot"></span>本地扫描模式</div>
       </aside>
@@ -41,13 +41,13 @@
         <div class="panel hero">
           <div class="hero-copy">
             <span class="eyebrow">OPS / CLEANUP ENGINE</span>
-            <h1>把 flag 债务一次扫干净</h1>
-            <p>支持配置、代码引用、实验日期和发布记录。输出过期项、死分支、清理清单、测试建议和安全提醒。</p>
+            <h1>把功能开关债务一次扫清</h1>
+            <p>检查功能开关的配置、代码引用、实验日期和发布记录，告诉你发现了什么，以及下一步应该处理什么。</p>
           </div>
           <div class="hero-stats" id="heroStats">
-            <div><strong id="statFlags">0</strong><span>flags</span></div>
-            <div><strong id="statDead">0</strong><span>死分支</span></div>
-            <div><strong id="statRisk">100</strong><span>风险分</span></div>
+            <div><strong id="statFlags">0</strong><span>功能开关</span></div>
+            <div><strong id="statDead">0</strong><span>疑似固定分支</span></div>
+            <div><strong id="statRisk">100</strong><span>安全度</span></div>
           </div>
         </div>
 
@@ -114,10 +114,11 @@
               <div class="meta" id="generatedAt">等待扫描</div>
               <button class="ghost-btn compact-btn" id="exportBtn" title="导出 Markdown 报告"><span data-icon="download"></span>Markdown</button>
               <button class="ghost-btn compact-btn" id="exportJsonBtn" title="导出完整 JSON 数据">JSON</button>
-              <button class="ghost-btn compact-btn" id="aiSummaryBtn" title="生成 AI 扫描解读">AI 解读</button>
+              <button class="ghost-btn compact-btn" id="aiSummaryBtn" title="生成 AI 扫描解读">AI 解读 <small id="aiStatus">检查中</small></button>
             </div>
           </div>
           <div class="input-check" id="inputCheck"></div>
+          <div class="action-summary" id="actionSummary"></div>
           <section class="ai-panel" id="aiPanel" hidden>
             <div class="ai-panel-head"><div><span>AI REVIEW</span><h3 id="aiHeadline">扫描解读</h3></div><span class="badge">仅供决策参考</span></div>
             <p id="aiSummaryText"></p>
@@ -131,7 +132,7 @@
           <div class="panel-head">
             <div>
               <span>EXPIRED FLAGS</span>
-              <h2>过期 flag</h2>
+              <h2>过期或待确认的开关</h2>
             </div>
             <span class="badge" id="flagCount">0</span>
           </div>
@@ -142,7 +143,7 @@
           <div class="panel-head">
             <div>
               <span>DEAD BRANCHES</span>
-              <h2>死分支</h2>
+              <h2>疑似固定分支</h2>
             </div>
             <span class="badge" id="branchCount">0</span>
           </div>
@@ -177,7 +178,7 @@
           <div class="panel-head">
             <div>
               <span>EXPERIMENT RESIDUE</span>
-              <h2>实验代码</h2>
+              <h2>实验结束后仍保留的代码</h2>
             </div>
             <span class="badge" id="residueCount">0</span>
           </div>
